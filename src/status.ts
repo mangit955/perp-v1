@@ -1,5 +1,6 @@
 import type {
   Fill,
+  FillId,
   Liquidation,
   Market,
   MarketSymbol,
@@ -12,7 +13,7 @@ import type {
   UserId,
 } from "./types";
 
-export const userById = new Map<UserId, User>();
+export const usersById = new Map<UserId, User>();
 export const usersByUsername = new Map<string, UserId>();
 export const sessionsByToken = new Map<string, Session>();
 
@@ -23,10 +24,15 @@ export const ordersById = new Map<OrderId, Order>();
 export const orderBooksByMarket = new Map<MarketSymbol, OrderBook>();
 
 export const fills: Fill[] = [];
-export const liquidation: Liquidation[] = [];
+export const liquidations: Liquidation[] = [];
 
 export let nextUserId = 1;
+export let nextFillId = 1;
 
 export function getNextUserId(): UserId {
   return nextUserId++;
+}
+
+export function getNextFillId(): FillId {
+  return nextFillId++;
 }

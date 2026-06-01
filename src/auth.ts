@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
 import type { User } from "./types";
-import { sessionsByToken, userById } from "./status";
+import { sessionsByToken, usersById } from "./status";
 export function createToken(): string {
   return crypto.randomUUID();
 }
@@ -21,14 +21,14 @@ export function getAuthUser(req: Request): User | null {
   const session = sessionsByToken.get(token);
   if (!session) return null;
 
-  return userById.get(session.userId) ?? null;
+  return usersById.get(session.userId) ?? null;
 }
 
 export function requireAuthUser(req: Request, res: Response): User | null {
   const user = getAuthUser(req);
 
   if (!user) {
-    res.status(401).json({ error: "authorized" });
+    res.status(401).json({ error: "unauthorized" });
     return null;
   }
 

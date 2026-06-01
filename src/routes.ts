@@ -2,11 +2,11 @@ import { Router } from "express";
 import {
   getNextUserId,
   sessionsByToken,
-  userById,
+  usersById,
   usersByUsername,
 } from "./status";
 import type { User } from "./types";
-import { createToken } from "./auth";
+import { createToken, requireAuthUser } from "./auth";
 
 export const router = Router();
 
@@ -42,7 +42,7 @@ router.post("/signup", async (req, res) => {
     createdAt: new Date(),
   };
 
-  userById.set(userId, user);
+  usersById.set(userId, user);
   usersByUsername.set(normalizeUsername, userId);
 
   const token = createToken();
@@ -82,7 +82,7 @@ router.post("/signin", async (req, res) => {
     return;
   }
 
-  const user = userById.get(userId);
+  const user = usersById.get(userId);
 
   if (!user) {
     res.status(409).json({ error: "invalid username or password" });
@@ -93,7 +93,41 @@ router.post("/signin", async (req, res) => {
 
   if (!PasswordValid) {
     res.status(409).json({ error: "invalid username or password" });
+    return;
   }
 
   const token = createToken();
+
+  sessionsByToken.set(token, {
+    token,
+    userId: user.userId,
+    createdAt: new Date(),
+  });
+
+  res.json({
+    token,
+    userId: user.userId,
+    username: user.username,
+  });
+});
+
+router.post("/onramp", async (req, res) => {
+  const user = requireAuthUser(req, res);
+
+  if (!user) return;
+
+  const { amount } = req.body;
+
+  if (typeof amount !== "number" || !Number.isFinite(amount) || amount <= 0) {
+    res.status(409).json({ error: "amount must be greater than 0" });
+    return;
+  }
+
+  user.availableCollateral += amount;
+
+  res.json({
+    userId: user.userId,
+    availableCollateral: user.availableCollateral,
+    lockedCollateral: user.lockedCollateral,
+  });
 });

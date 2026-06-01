@@ -1,6 +1,6 @@
 export type Side = "LONG" | "SHORT";
 export type OrderType = "MARKET" | "LIMIT";
-export type OrderStatus = "OPEN" | "PARTIALLY_FILLED" | "FILLED" | "CANCLLED";
+export type OrderStatus = "OPEN" | "PARTIALLY_FILLED" | "FILLED" | "CANCELLED";
 export type PositionStatus = "OPEN" | "CLOSED" | "LIQUIDATED";
 
 export type UserId = number;
@@ -19,7 +19,7 @@ export type User = {
 };
 
 export type Session = {
-  token: number;
+  token: string;
   userId: UserId;
   createdAt: Date;
 };
@@ -38,7 +38,7 @@ export type Market = {
 };
 
 export type Position = {
-  PositionId: string;
+  positionId: string;
   userId: UserId;
   market: MarketSymbol;
   side: Side;
