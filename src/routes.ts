@@ -7,6 +7,7 @@ import {
 } from "./status";
 import type { User } from "./types";
 import { createToken, requireAuthUser } from "./auth";
+import { cancelOrder, placeOrder } from "./orders";
 
 export const router = Router();
 
@@ -130,4 +131,32 @@ router.post("/onramp", async (req, res) => {
     availableCollateral: user.availableCollateral,
     lockedCollateral: user.lockedCollateral,
   });
+});
+
+router.post("/order", (req, res) => {
+  const user = requireAuthUser(req, res);
+  if (!user) return;
+
+  const result = placeOrder(user, req.body);
+
+  if (!result.ok) {
+    res.status(result.status).json({ error: result.error });
+    return;
+  }
+
+  res.status(201).json(result.data);
+});
+
+router.delete("/order", (req, res) => {
+  const user = requireAuthUser(req, res);
+  if (!user) return;
+
+  const result = cancelOrder(user, req.body);
+
+  if (!result.ok) {
+    res.status(result.status).json({ error: result.error });
+    return;
+  }
+
+  res.json(result.data);
 });

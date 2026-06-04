@@ -28,6 +28,7 @@ export const liquidations: Liquidation[] = [];
 
 export let nextUserId = 1;
 export let nextFillId = 1;
+export let nextOrderId = 1;
 
 export function getNextUserId(): UserId {
   return nextUserId++;
@@ -35,4 +36,8 @@ export function getNextUserId(): UserId {
 
 export function getNextFillId(): FillId {
   return nextFillId++;
+}
+
+export function getNextOrderId(): OrderId {
+  return nextOrderId++;
 }

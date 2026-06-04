@@ -1,6 +1,23 @@
 import { getPositionKey } from "./helper";
-import { fills, getNextFillId, positionsByUserMarket } from "./status";
-import type { Order, OrderBook, OrderType, Side, User } from "./types";
+import { requiredMargin, validateOrderRisk } from "./risks";
+import {
+  fills,
+  getNextFillId,
+  getNextOrderId,
+  orderBooksByMarket,
+  ordersById,
+  positionsByUserMarket,
+  usersById,
+} from "./status";
+import type {
+  Market,
+  Order,
+  OrderBook,
+  OrderId,
+  OrderType,
+  Side,
+  User,
+} from "./types";
 
 const SYSTEM_USER_ID = 0;
 const SYSTEM_ORDER_ID = 0;
@@ -175,4 +192,231 @@ function removeOrderFromBook(book: OrderBook, order: Order): void {
   if (level.orderId.length === 0 || level.availableQty <= 0) {
     side.delete(order.price);
   }
+}
+
+export function placeOrder(user: User, body: unknown): Result<Order> {
+  const input = body as Record<string, unknown>;
+
+  const market = typeof input.market === "string" ? input.market : null;
+  const side = parseSide(input.side);
+  const orderType = parseOrderType(input.OrderType);
+  const qty = positiveNumber(input.qty);
+  const leverage = positiveNumber(input.leverage);
+  const price =
+    input.price === undefined ? undefined : positiveNumber(input.price);
+
+  if (!market || !side || !orderType || !qty || !leverage) {
+    return { ok: false, status: 400, error: "invalid order body" };
+  }
+
+  if (orderType === "LIMIT" && !price) {
+    return { ok: false, status: 400, error: "limit orders require price" };
+  }
+
+  const risk = validateOrderRisk({
+    user,
+    marketSymbol: market,
+    qty,
+    leverage,
+    price: price ?? undefined,
+  });
+  if (!risk.ok) {
+    return { ok: false, status: 400, error: risk.error };
+  }
+
+  const book = orderBooksByMarket.get(market);
+  if (!book)
+    return { ok: false, status: 400, error: "orderbook does not exist" };
+
+  const order: Order = {
+    orderId: getNextOrderId(),
+    userId: user.userId,
+    market,
+    side,
+    orderType,
+    price: orderType === "LIMIT" ? price! : risk.market.markPrice,
+    qty,
+    filledQty: 0,
+    remainingQty: qty,
+    leverage,
+    marginLocked: 0,
+    status: "OPEN",
+    createdAt: new Date(),
+  };
+
+  ordersById.set(order.orderId, order);
+
+  const matchResult = matchAgainstBook(user, order, book);
+  if (!matchResult.ok) return matchResult;
+
+  if (order.orderType === "MARKET" && order.remainingQty > 0) {
+    const markResult = fillAgainstMarkPrice(user, order, risk.market);
+    if (!markResult.ok) return markResult;
+  }
+
+  if (order.orderType === "LIMIT" && order.remainingQty > 0) {
+    const marginToLock = requiredMargin(
+      order.remainingQty,
+      order.price,
+      order.leverage,
+    );
+
+    if (user.availableCollateral < marginToLock) {
+      return {
+        ok: false,
+        status: 400,
+        error: "insufficient collateral to rest order",
+      };
+    }
+
+    user.availableCollateral -= marginToLock;
+    user.lockedCollateral += marginToLock;
+    order.marginLocked = marginToLock;
+    addOrderToBook(book, order);
+  }
+
+  setOrderStatus(order);
+  return { ok: true, data: order };
+}
+
+function matchAgainstBook(
+  user: User,
+  takerOrder: Order,
+  book: OrderBook,
+): Result<null> {
+  const opposite = oppositeBookSide(book, takerOrder.side);
+
+  for (const price of sortedPrice(opposite, takerOrder.side)) {
+    if (takerOrder.remainingQty <= 0) break;
+    if (
+      takerOrder.orderType === "LIMIT" &&
+      !crosses(takerOrder.side, takerOrder.price, price)
+    )
+      break;
+
+    const level = opposite.get(price);
+    if (!level) continue;
+
+    for (const makerOrderId of [...level.orderId]) {
+      if (takerOrder.remainingQty <= 0) break;
+
+      const makerOrder = ordersById.get(makerOrderId);
+      if (!makerOrder || makerOrder.remainingQty <= 0) continue;
+
+      const makerUser = usersById.get(makerOrder.userId);
+      if (!makerUser) continue;
+
+      const fillQty = Math.min(
+        takerOrder.remainingQty,
+        makerOrder.remainingQty,
+      );
+      const takerMargin = requiredMargin(fillQty, price, takerOrder.leverage);
+      const makerMargin =
+        makerOrder.marginLocked * (fillQty / makerOrder.remainingQty);
+
+      const makerResult = applyOpeningFill({
+        user: makerUser,
+        order: makerOrder,
+        qty: fillQty,
+        price,
+        margin: makerMargin,
+        source: "LOCKED",
+      });
+      if (!makerResult.ok) return makerResult;
+
+      const takerResult = applyOpeningFill({
+        user,
+        order: takerOrder,
+        qty: fillQty,
+        price,
+        margin: takerMargin,
+        source: "AVAILABLE",
+      });
+      if (!takerResult.ok) return takerResult;
+
+      makerOrder.filledQty += fillQty;
+      makerOrder.remainingQty -= fillQty;
+      takerOrder.filledQty += fillQty;
+      takerOrder.remainingQty -= fillQty;
+      level.availableQty -= fillQty;
+
+      setOrderStatus(makerOrder);
+      setOrderStatus(takerOrder);
+      recordFills({ takerOrder, makerOrder, price, qty: fillQty });
+
+      if (makerOrder.remainingQty <= 0) {
+        level.orderId = level.orderId.filter((id) => id !== makerOrderId);
+      }
+    }
+
+    if (level.orderId.length === 0 || level.availableQty <= 0) {
+      opposite.delete(price);
+    }
+  }
+
+  return { ok: true, data: null };
+}
+
+function fillAgainstMarkPrice(
+  user: User,
+  order: Order,
+  market: Market,
+): Result<null> {
+  const qty = order.remainingQty;
+  const price = market.markPrice;
+  const margin = requiredMargin(qty, price, order.leverage);
+
+  const result = applyOpeningFill({
+    user,
+    order,
+    qty,
+    price,
+    margin,
+    source: "AVAILABLE",
+  });
+
+  if (!result.ok) return result;
+
+  order.filledQty += qty;
+  order.remainingQty = 0;
+  setOrderStatus(order);
+  recordFills({ takerOrder: order, price, qty });
+
+  return { ok: true, data: null };
+}
+
+export function cancelOrder(user: User, body: unknown): Result<Order> {
+  const input = body as Record<string, unknown>;
+  const orderId = input.orderId;
+
+  if (typeof orderId !== "number" || !Number.isInteger(orderId)) {
+    return { ok: false, status: 400, error: "orderId is required" };
+  }
+
+  const order = ordersById.get(orderId as OrderId);
+  if (!order) return { ok: false, status: 404, error: "order not found" };
+
+  if (order.userId !== user.userId) {
+    return {
+      ok: false,
+      status: 403,
+      error: "cannot cancel another user's order",
+    };
+  }
+
+  if (order.status !== "OPEN" && order.status !== "PARTIALLY_FILLED") {
+    return { ok: false, status: 400, error: "order is not cancellable" };
+  }
+
+  const book = orderBooksByMarket.get(order.market);
+  if (book) removeOrderFromBook(book, order);
+
+  user.lockedCollateral -= order.marginLocked;
+  user.availableCollateral += order.marginLocked;
+
+  order.marginLocked = 0;
+  order.remainingQty = 0;
+  order.status = "CANCELLED";
+
+  return { ok: true, data: order };
 }
