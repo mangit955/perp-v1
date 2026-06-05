@@ -2,6 +2,7 @@ import type {
   Fill,
   FillId,
   Liquidation,
+  LiquidationId,
   Market,
   MarketSymbol,
   Order,
@@ -29,6 +30,7 @@ export const liquidations: Liquidation[] = [];
 export let nextUserId = 1;
 export let nextFillId = 1;
 export let nextOrderId = 1;
+export let nextLiquidationId = 1;
 
 export function getNextUserId(): UserId {
   return nextUserId++;
@@ -40,4 +42,8 @@ export function getNextFillId(): FillId {
 
 export function getNextOrderId(): OrderId {
   return nextOrderId++;
+}
+
+export function getNextLiquidationId(): LiquidationId {
+  return nextLiquidationId++;
 }

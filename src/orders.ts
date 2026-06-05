@@ -44,7 +44,7 @@ function positiveNumber(value: unknown): number | null {
 
 function setOrderStatus(order: Order): void {
   if (order.remainingQty <= 0) order.status = "FILLED";
-  else if (order.remainingQty > 0) order.status = "PARTIALLY_FILLED";
+  else if (order.filledQty > 0) order.status = "PARTIALLY_FILLED";
   else order.status = "OPEN";
 }
 
@@ -199,7 +199,7 @@ export function placeOrder(user: User, body: unknown): Result<Order> {
 
   const market = typeof input.market === "string" ? input.market : null;
   const side = parseSide(input.side);
-  const orderType = parseOrderType(input.OrderType);
+  const orderType = parseOrderType(input.orderType);
   const qty = positiveNumber(input.qty);
   const leverage = positiveNumber(input.leverage);
   const price =
