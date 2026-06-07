@@ -1,10 +1,11 @@
-import { unrealisedPnL } from "./risks";
+import { isPositionLiquidable, unrealisedPnL } from "./risks";
 import {
   getNextLiquidationId,
   liquidations,
   marketsBySymbol,
   orderBooksByMarket,
   ordersById,
+  positionsByUserMarket,
   usersById,
 } from "./status";
 import type { MarketSymbol, Order, Position } from "./types";
@@ -74,4 +75,31 @@ function liquidatePosition(position: Position): void {
   position.realizedPnL += realizedPnl;
   position.status = "LIQUIDATED";
   position.updatedAt = new Date();
+}
+
+export function liquidationScanner(market: MarketSymbol): void {
+  const marketConfig = marketsBySymbol.get(market);
+  if (!marketConfig) return;
+
+  for (const position of positionsByUserMarket.values()) {
+    if (position.market !== market || position.status !== "OPEN") continue;
+    if (isPositionLiquidable(position, marketConfig)) {
+      liquidatePosition(position);
+    }
+  }
+}
+
+export function onPriceUpdate(
+  market: MarketSymbol,
+  markPrice: number,
+  indexPrice = markPrice,
+): void {
+  const marketConfig = marketsBySymbol.get(market);
+  if (!marketConfig) throw new Error("Market not found");
+  if (!Number.isFinite(markPrice) || markPrice <= 0)
+    throw new Error("Invalid price");
+
+  marketConfig.markPrice = markPrice;
+  marketConfig.indexPrice = indexPrice;
+  liquidationScanner(market);
 }

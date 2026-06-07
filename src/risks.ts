@@ -1,8 +1,10 @@
 import { marketsBySymbol, positionsByUserMarket } from "./status";
+import { getPositionKey } from "./helper";
 import {
   type Market,
   type MarketSymbol,
   type Position,
+  type Side,
   type User,
 } from "./types";
 
@@ -78,13 +80,14 @@ export function isUserLiqisatable(userId: number): boolean {
 export function validateOrderRisk(params: {
   user: User;
   marketSymbol: MarketSymbol;
+  side: Side;
   leverage: number;
   price?: number;
   qty: number;
 }):
   | { ok: true; market: Market; requiredMargin: number }
   | { ok: false; error: string } {
-  const { user, marketSymbol, leverage, price, qty } = params;
+  const { user, marketSymbol, side, leverage, price, qty } = params;
 
   const market = getMarketOrNull(marketSymbol);
 
@@ -105,7 +108,15 @@ export function validateOrderRisk(params: {
   }
 
   const executionPrice = params.price ?? market.markPrice; // fetch price form params if given othrwise fetch markPrice from market
-  const margin = requiredMargin(qty, executionPrice, leverage);
+  const position = positionsByUserMarket.get(
+    getPositionKey(user.userId, marketSymbol),
+  );
+  const openingQty =
+    position && position.status === "OPEN" && position.side !== side
+      ? Math.max(0, qty - position.qty)
+      : qty;
+  const margin =
+    openingQty > 0 ? requiredMargin(openingQty, executionPrice, leverage) : 0;
 
   if (user.availableCollateral < margin) {
     return { ok: false, error: "Insufficient balance" };

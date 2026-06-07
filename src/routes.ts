@@ -8,6 +8,7 @@ import {
 import type { User } from "./types";
 import { createToken, requireAuthUser } from "./auth";
 import { cancelOrder, placeOrder } from "./orders";
+import { onPriceUpdate } from "./liquidations";
 
 export const router = Router();
 
@@ -159,4 +160,20 @@ router.delete("/order", (req, res) => {
   }
 
   res.json(result.data);
+});
+
+router.post("/price", (req, res) => {
+  const { market, markPrice, indexPrice } = req.body;
+
+  if (typeof market !== "string") {
+    res.status(400).json({ error: "market is required" });
+    return;
+  }
+
+  try {
+    onPriceUpdate(market, markPrice, indexPrice);
+    res.json({ market, markPrice, indexPrice: indexPrice ?? markPrice });
+  } catch (error) {
+    res.status(400).json({ error: String(error) });
+  }
 });

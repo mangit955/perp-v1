@@ -1,5 +1,7 @@
 import { getPositionKey } from "./helper";
 import { requiredMargin, validateOrderRisk } from "./risks";
+import { liquidationScanner } from "./liquidations";
+import { applyTradePosition } from "./positions";
 import {
   fills,
   getNextFillId,
@@ -70,72 +72,20 @@ function crosses(side: Side, takerPrice: number, makerPrice: number): boolean {
   return side === "LONG" ? takerPrice >= makerPrice : takerPrice <= makerPrice;
 }
 
-// position update helpers
-function CanOpenOrIncrease(user: User, side: Side, market: string): boolean {
+function getOpeningQty(user: User, side: Side, market: string, qty: number) {
   const position = positionsByUserMarket.get(
     getPositionKey(user.userId, market),
   );
-  return !position || position.status !== "OPEN" || position.side == side;
-}
 
-function applyOpeningFill(params: {
-  user: User;
-  order: Order;
-  qty: number;
-  price: number;
-  margin: number;
-  source: "AVAILABLE" | "LOCKED";
-}): Result<null> {
-  const { user, order, qty, price, margin, source } = params;
-
-  if (!CanOpenOrIncrease(user, order.side, order.market)) {
-    return {
-      ok: false,
-      status: 400,
-      error: "opposite-side position updates come in phase 5",
-    };
+  if (!position || position.status !== "OPEN" || position.qty <= 0) {
+    return qty;
   }
 
-  if (source === "AVAILABLE") {
-    if (user.availableCollateral < margin) {
-      return { ok: false, status: 400, error: "Insuffient funds!" };
-    }
-    user.availableCollateral -= margin;
-  } else {
-    user.lockedCollateral -= margin;
-    order.marginLocked -= margin;
+  if (position.side === side) {
+    return qty;
   }
 
-  const key = getPositionKey(user.userId, order.market);
-  const existing = positionsByUserMarket.get(key);
-
-  if (!existing || existing.status !== "OPEN") {
-    positionsByUserMarket.set(key, {
-      positionId: key,
-      userId: user.userId,
-      market: order.market,
-      side: order.side,
-      qty,
-      entryPrice: price,
-      margin,
-      leverage: order.leverage,
-      realizedPnL: 0,
-      status: "OPEN",
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
-    return { ok: true, data: null };
-  }
-
-  const newQty = existing.qty + qty;
-  existing.entryPrice =
-    (existing.qty * existing.entryPrice + qty * price) / newQty;
-  existing.qty = newQty;
-  existing.margin += margin;
-  existing.leverage = (existing.qty * existing.entryPrice) / existing.margin;
-  existing.updatedAt = new Date();
-
-  return { ok: true, data: null };
+  return Math.max(0, qty - position.qty);
 }
 
 function recordFills(params: {
@@ -216,6 +166,7 @@ export function placeOrder(user: User, body: unknown): Result<Order> {
   const risk = validateOrderRisk({
     user,
     marketSymbol: market,
+    side,
     qty,
     leverage,
     price: price ?? undefined,
@@ -255,11 +206,16 @@ export function placeOrder(user: User, body: unknown): Result<Order> {
   }
 
   if (order.orderType === "LIMIT" && order.remainingQty > 0) {
-    const marginToLock = requiredMargin(
+    const openingQty = getOpeningQty(
+      user,
+      order.side,
+      order.market,
       order.remainingQty,
-      order.price,
-      order.leverage,
     );
+    const marginToLock =
+      openingQty > 0
+        ? requiredMargin(openingQty, order.price, order.leverage)
+        : 0;
 
     if (user.availableCollateral < marginToLock) {
       return {
@@ -276,6 +232,7 @@ export function placeOrder(user: User, body: unknown): Result<Order> {
   }
 
   setOrderStatus(order);
+  liquidationScanner(order.market);
   return { ok: true, data: order };
 }
 
@@ -310,27 +267,32 @@ function matchAgainstBook(
         takerOrder.remainingQty,
         makerOrder.remainingQty,
       );
-      const takerMargin = requiredMargin(fillQty, price, takerOrder.leverage);
+      const makerOpeningQty = getOpeningQty(
+        makerUser,
+        makerOrder.side,
+        makerOrder.market,
+        fillQty,
+      );
       const makerMargin =
-        makerOrder.marginLocked * (fillQty / makerOrder.remainingQty);
+        makerOpeningQty > 0
+          ? requiredMargin(makerOpeningQty, price, makerOrder.leverage)
+          : 0;
 
-      const makerResult = applyOpeningFill({
+      const makerResult = applyTradePosition({
         user: makerUser,
         order: makerOrder,
         qty: fillQty,
         price,
-        margin: makerMargin,
-        source: "LOCKED",
+        source: { kind: "LOCKED", lockedMarginForFill: makerMargin },
       });
       if (!makerResult.ok) return makerResult;
 
-      const takerResult = applyOpeningFill({
+      const takerResult = applyTradePosition({
         user,
         order: takerOrder,
         qty: fillQty,
         price,
-        margin: takerMargin,
-        source: "AVAILABLE",
+        source: { kind: "AVAILABLE" },
       });
       if (!takerResult.ok) return takerResult;
 
@@ -364,15 +326,13 @@ function fillAgainstMarkPrice(
 ): Result<null> {
   const qty = order.remainingQty;
   const price = market.markPrice;
-  const margin = requiredMargin(qty, price, order.leverage);
 
-  const result = applyOpeningFill({
+  const result = applyTradePosition({
     user,
     order,
     qty,
     price,
-    margin,
-    source: "AVAILABLE",
+    source: { kind: "AVAILABLE" },
   });
 
   if (!result.ok) return result;
