@@ -9,6 +9,14 @@ import type { User } from "./types";
 import { createToken, requireAuthUser } from "./auth";
 import { cancelOrder, placeOrder } from "./orders";
 import { onPriceUpdate } from "./liquidations";
+import {
+  getAvailableEquity,
+  getClosedPositions,
+  getOpenOrders,
+  getOpenPosition,
+  getOrders,
+  getUserFills,
+} from "./views";
 
 export const router = Router();
 
@@ -162,11 +170,102 @@ router.delete("/order", (req, res) => {
   res.json(result.data);
 });
 
+router.get("/equity/available", (req, res) => {
+  const user = requireAuthUser(req, res);
+  if (!user) return;
+
+  res.json(getAvailableEquity(user));
+});
+
+router.get("/positions/open/:marketId", (req, res) => {
+  const user = requireAuthUser(req, res);
+  if (!user) return;
+
+  const marketId = req.params.marketId;
+  if (!marketId) {
+    res.status(400).json({ error: "marketId is required" });
+    return;
+  }
+
+  const position = getOpenPosition(user, marketId);
+  if (!position) {
+    res.status(404).json({ error: "open position not found" });
+    return;
+  }
+
+  res.json(position);
+});
+
+router.get("/positions/closed/:marketId", (req, res) => {
+  const user = requireAuthUser(req, res);
+  if (!user) return;
+
+  const marketId = req.params.marketId;
+  if (!marketId) {
+    res.status(400).json({ error: "marketId is required" });
+    return;
+  }
+
+  res.json(getClosedPositions(user, marketId));
+});
+
+router.get("/orders/open/:marketId", (req, res) => {
+  const user = requireAuthUser(req, res);
+  if (!user) return;
+
+  const marketId = req.params.marketId;
+  if (!marketId) {
+    res.status(400).json({ error: "marketId is required" });
+    return;
+  }
+
+  res.json(getOpenOrders(user, marketId));
+});
+
+router.get("/orders/:marketId", (req, res) => {
+  const user = requireAuthUser(req, res);
+  if (!user) return;
+
+  const marketId = req.params.marketId;
+  if (!marketId) {
+    res.status(400).json({ error: "marketId is required" });
+    return;
+  }
+
+  res.json(getOrders(user, marketId));
+});
+
+router.get("/fills", (req, res) => {
+  const user = requireAuthUser(req, res);
+  if (!user) return;
+
+  res.json(getUserFills(user));
+});
+
 router.post("/price", (req, res) => {
   const { market, markPrice, indexPrice } = req.body;
 
   if (typeof market !== "string") {
     res.status(400).json({ error: "market is required" });
+    return;
+  }
+
+  if (
+    typeof markPrice !== "number" ||
+    !Number.isFinite(markPrice) ||
+    markPrice <= 0
+  ) {
+    res.status(400).json({ error: "markPrice must be greater than 0" });
+    return;
+  }
+
+  if (
+    indexPrice !== undefined &&
+    (typeof indexPrice !== "number" ||
+      !Number.isFinite(indexPrice) ||
+      indexPrice <= 0)
+  ) {
+    res.status(400).json({ error: "indexPrice must be greater than 0" });
     return;
   }
 
