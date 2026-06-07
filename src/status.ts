@@ -47,3 +47,19 @@ export function getNextOrderId(): OrderId {
 export function getNextLiquidationId(): LiquidationId {
   return nextLiquidationId++;
 }
+
+export function resetRuntimeState(): void {
+  usersById.clear();
+  usersByUsername.clear();
+  sessionsByToken.clear();
+  marketsBySymbol.clear();
+  positionsByUserMarket.clear();
+  ordersById.clear();
+  orderBooksByMarket.clear();
+  fills.length = 0;
+  liquidations.length = 0;
+  nextUserId = 1;
+  nextFillId = 1;
+  nextOrderId = 1;
+  nextLiquidationId = 1;
+}

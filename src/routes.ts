@@ -1,10 +1,12 @@
 import { Router } from "express";
 import {
   getNextUserId,
+  resetRuntimeState,
   sessionsByToken,
   usersById,
   usersByUsername,
 } from "./status";
+import { seedMarkets } from "./seed";
 import type { User } from "./types";
 import { createToken, requireAuthUser } from "./auth";
 import { cancelOrder, placeOrder } from "./orders";
@@ -19,6 +21,12 @@ import {
 } from "./views";
 
 export const router = Router();
+
+router.post("/reset", (_req, res) => {
+  resetRuntimeState();
+  seedMarkets();
+  res.json({ ok: true });
+});
 
 router.post("/signup", async (req, res) => {
   const { username, password } = req.body;

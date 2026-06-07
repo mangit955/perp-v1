@@ -29,7 +29,11 @@ const seedMarket: Market[] = [
   },
 ];
 
-for (const market of seedMarket) {
-  marketsBySymbol.set(market.symbol, market);
-  orderBooksByMarket.set(market.symbol, createOrderBook(market.symbol));
+export function seedMarkets(): void {
+  for (const market of seedMarket) {
+    marketsBySymbol.set(market.symbol, { ...market });
+    orderBooksByMarket.set(market.symbol, createOrderBook(market.symbol));
+  }
 }
+
+seedMarkets();

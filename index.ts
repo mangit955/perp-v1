@@ -1,6 +1,11 @@
 import express from "express";
 import "./src/seed";
 import { router } from "./src/routes";
+import { startBinanceMarketData } from "./src/binanceMarketData";
+
+if (process.env.DISABLE_BINANCE_MARKET_DATA !== "true") {
+  startBinanceMarketData();
+}
 
 const app = express();
 app.use(express.json());
@@ -11,8 +16,10 @@ app.get("/health", (req, res) => {
   res.json(true);
 });
 
-app.listen(3000, () => {
-  console.log("Perps v1 running on http://localhost:3000");
+const port = Number(process.env.PORT ?? 3000);
+
+app.listen(port, () => {
+  console.log(`Perps v1 running on http://localhost:${port}`);
 });
 
 // const users = [
