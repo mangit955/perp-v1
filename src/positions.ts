@@ -31,7 +31,7 @@ export function applyTradePosition(params: {
   const isOpposite = isOpen && positions.side !== order.side;
   const closeQty = isOpposite ? Math.min(qty, positions.qty) : 0;
   const openQty = isOpposite ? qty - closeQty : qty;
-  const realisedPnL = isOpposite ? closePnL(positions, closeQty, price) : 0;
+  const realisedPnL = isOpposite ? closePnL(positions, price, closeQty) : 0;
   const releasedMargin = isOpposite
     ? positions.margin * (closeQty / positions.qty)
     : 0;
